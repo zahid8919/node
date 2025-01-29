@@ -29,7 +29,6 @@ This a list of all the dependencies:
 * [openssl][]
 * [postject][]
 * [simdjson][]
-* [simdutf][]
 * [sqlite][]
 * [undici][]
 * [uvwasi][]
@@ -356,11 +355,6 @@ The [postject](https://github.com/nodejs/postject) dependency is used for the
 The [simdjson](https://github.com/simdjson/simdjson) dependency is
 a C++ library for fast JSON parsing.
 
-### simdutf
-
-The [simdutf](https://github.com/simdutf/simdutf) dependency is
-a C++ library for fast UTF-8 decoding and encoding.
-
 ### sqlite
 
 The [sqlite](https://github.com/sqlite/sqlite) dependency is
@@ -421,7 +415,6 @@ performance improvements not currently available in standard zlib.
 [openssl]: #openssl
 [postject]: #postject
 [simdjson]: #simdjson
-[simdutf]: #simdutf
 [sqlite]: #sqlite
 [undici]: #undici
 [update-openssl-action]: ../../../.github/workflows/update-openssl.yml

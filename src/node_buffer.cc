@@ -1477,6 +1477,7 @@ uint32_t FastWriteString(Local<Value> receiver,
                          uint32_t max_length,
                          // NOLINTNEXTLINE(runtime/references) This is V8 api.
                          v8::FastApiCallbackOptions& options) {
+  HandleScope handle_scope(options.isolate);
   THROW_AND_RETURN_VAL_UNLESS_BUFFER(options.isolate, dst, "dst", 0);
   SPREAD_BUFFER_ARG(dst, dst_buffer);
   CHECK(dst_buffer_length <=

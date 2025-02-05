@@ -20,6 +20,7 @@
 #include "src/heap/cppgc/marking-state.h"
 #include "src/heap/cppgc/marking-visitor.h"
 #include "src/heap/cppgc/marking-worklists.h"
+#include "src/heap/cppgc/stats-collector.h"
 #include "src/heap/cppgc/task-handle.h"
 
 namespace cppgc {
@@ -113,12 +114,11 @@ class V8_EXPORT_PRIVATE MarkerBase {
   // - LeaveAtomicPause()
   void FinishMarking(StackState);
 
+  void ProcessCrossThreadWeaknessIfNeeded();
   void ProcessWeakness();
 
   bool JoinConcurrentMarkingIfNeeded();
   void NotifyConcurrentMarkingOfWorkIfNeeded(cppgc::TaskPriority);
-
-  inline void WriteBarrierForInConstructionObject(HeapObjectHeader&);
 
   template <WriteBarrierType type>
   inline void WriteBarrierForObject(HeapObjectHeader&);
@@ -143,7 +143,19 @@ class V8_EXPORT_PRIVATE MarkerBase {
   }
 
  protected:
-  class IncrementalMarkingAllocationObserver;
+  class IncrementalMarkingAllocationObserver final
+      : public StatsCollector::AllocationObserver {
+   public:
+    static constexpr size_t kMinAllocatedBytesPerStep = 256 * kKB;
+
+    explicit IncrementalMarkingAllocationObserver(MarkerBase& marker);
+
+    void AllocatedObjectSizeIncreased(size_t delta) final;
+
+   private:
+    MarkerBase& marker_;
+    size_t current_allocated_size_ = 0;
+  };
 
   using IncrementalMarkingTaskHandle = SingleThreadedHandle;
 
@@ -155,6 +167,11 @@ class V8_EXPORT_PRIVATE MarkerBase {
   virtual cppgc::Visitor& visitor() = 0;
   virtual ConservativeTracingVisitor& conservative_visitor() = 0;
   virtual heap::base::StackVisitor& stack_visitor() = 0;
+
+  heap::base::IncrementalMarkingSchedule* schedule() { return schedule_.get(); }
+  const heap::base::IncrementalMarkingSchedule* schedule() const {
+    return schedule_.get();
+  }
 
   // Processes the worklists with given deadlines. The deadlines are only
   // checked every few objects.
@@ -177,6 +194,8 @@ class V8_EXPORT_PRIVATE MarkerBase {
 
   void HandleNotFullyConstructedObjects();
 
+  void AddMutatorThreadMarkedBytes(size_t);
+
   HeapBase& heap_;
   MarkingConfig config_ = MarkingConfig::Default();
 
@@ -193,8 +212,11 @@ class V8_EXPORT_PRIVATE MarkerBase {
   std::unique_ptr<heap::base::IncrementalMarkingSchedule> schedule_;
   std::unique_ptr<ConcurrentMarkerBase> concurrent_marker_{nullptr};
 
+  size_t mutator_thread_marked_bytes_ = 0;
+
   bool main_marking_disabled_for_testing_{false};
   bool visited_cross_thread_persistents_in_atomic_pause_{false};
+  bool processed_cross_thread_weakness_{false};
 };
 
 class V8_EXPORT_PRIVATE Marker final : public MarkerBase {
@@ -215,13 +237,37 @@ class V8_EXPORT_PRIVATE Marker final : public MarkerBase {
   ConservativeMarkingVisitor conservative_marking_visitor_;
 };
 
-void MarkerBase::WriteBarrierForInConstructionObject(HeapObjectHeader& header) {
-  mutator_marking_state_.not_fully_constructed_worklist()
-      .Push<AccessMode::kAtomic>(&header);
-}
-
 template <MarkerBase::WriteBarrierType type>
 void MarkerBase::WriteBarrierForObject(HeapObjectHeader& header) {
+  // The barrier optimizes for the bailout cases:
+  // - kDijkstra: Marked objects.
+  // - kSteele: Unmarked objects.
+  switch (type) {
+    case MarkerBase::WriteBarrierType::kDijkstra:
+      if (!header.TryMarkAtomic()) {
+        return;
+      }
+      break;
+    case MarkerBase::WriteBarrierType::kSteele:
+      if (!header.IsMarked<AccessMode::kAtomic>()) {
+        return;
+      }
+      break;
+  }
+
+  // The barrier fired. Filter out in-construction objects here. This possibly
+  // requires unmarking the object again.
+  if (V8_UNLIKELY(header.IsInConstruction<AccessMode::kNonAtomic>())) {
+    // In construction objects are traced only if they are unmarked. If marking
+    // reaches this object again when it is fully constructed, it will re-mark
+    // it and tracing it as a previously not fully constructed object would know
+    // to bail out.
+    header.Unmark<AccessMode::kAtomic>();
+    mutator_marking_state_.not_fully_constructed_worklist()
+        .Push<AccessMode::kAtomic>(&header);
+    return;
+  }
+
   switch (type) {
     case MarkerBase::WriteBarrierType::kDijkstra:
       mutator_marking_state_.write_barrier_worklist().Push(&header);

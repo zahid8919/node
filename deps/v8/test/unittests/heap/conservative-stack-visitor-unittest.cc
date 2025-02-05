@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/heap/conservative-stack-visitor.h"
+#include "src/heap/conservative-stack-visitor-inl.h"
 
 #include "src/codegen/assembler-inl.h"
 #include "test/unittests/heap/heap-utils.h"
@@ -78,7 +78,7 @@ class RecordingVisitor final : public RootVisitor {
   }
 
   Tagged<InstructionStream> AllocateCodeObject(Isolate* isolate, int size) {
-    Assembler assm(AssemblerOptions{});
+    Assembler assm(isolate->allocator(), AssemblerOptions{});
 
     for (int i = 0; i < size; ++i)
       assm.nop();  // supported on all architectures

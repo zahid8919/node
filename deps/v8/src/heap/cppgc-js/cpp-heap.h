@@ -127,6 +127,7 @@ class V8_EXPORT_PRIVATE CppHeap final
   const HeapBase& AsBase() const { return *this; }
 
   void AttachIsolate(Isolate* isolate);
+  void StartDetachingIsolate();
   void DetachIsolate();
 
   void Terminate();
@@ -143,8 +144,10 @@ class V8_EXPORT_PRIVATE CppHeap final
       CollectionType,
       GarbageCollectionFlags = GarbageCollectionFlagValues::kNoFlags);
   void StartMarking();
-  bool AdvanceTracing(v8::base::TimeDelta max_duration);
-  bool IsTracingDone() const;
+  bool AdvanceMarking(v8::base::TimeDelta max_duration,
+                      size_t marked_bytes_limit);
+  bool IsMarkingDone() const;
+  void ProcessCrossThreadWeakness();
   void FinishMarkingAndProcessWeakness();
   void CompactAndSweep();
   void EnterFinalPause(cppgc::EmbedderStackState stack_state);
@@ -204,6 +207,8 @@ class V8_EXPORT_PRIVATE CppHeap final
   void EnableDetachedGarbageCollectionsForTesting();
   void CollectGarbageForTesting(CollectionType, StackState);
   void UpdateGCCapabilitiesFromFlagsForTesting();
+
+  bool CurrentThreadIsHeapThread() const final;
 
  private:
   void UpdateGCCapabilitiesFromFlags();
@@ -271,6 +276,11 @@ class V8_EXPORT_PRIVATE CppHeap final
   // Use standalone RNG to avoid initialization order dependency.
   std::optional<v8::base::RandomNumberGenerator> allocation_timeout_rng_;
 #endif  // V8_ENABLE_ALLOCATION_TIMEOUT
+
+  bool already_terminated_ = false;
+#if DEBUG
+  bool is_detached_ = true;
+#endif  // DEBUG
 
   friend class MetricRecorderAdapter;
 };
